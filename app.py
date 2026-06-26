@@ -6,7 +6,30 @@ from langchain_core.prompts import ChatPromptTemplate
 # [설정] 웹 페이지 제목 및 안내문
 st.set_page_config(page_title="카페 리뷰 답글 AI", page_icon="☕", layout="centered")
 st.title("☕ 우리집 카페 리뷰 답글 AI")
-st.write("클라우드 데이터베이스(Supabase)와 연동되어 데이터가 평생 안전하게 보존되며, 단골 관리 패널이 제공됩니다.")
+st.write("리뷰를 입력해주세요!")
+
+# ------------------------------------------------------------------
+# 🎨 [디자인 가미] 감성적인 카페라떼 알림 박스 함수
+# ------------------------------------------------------------------
+def st_latte_box(text: str):
+    """쨍한 에러 메시지 대신 포근한 라떼색 배경으로 안내하는 커스텀 박스"""
+    st.markdown(
+        f"""
+        <div style="
+            background-color: #F5EBE6; 
+            color: #5C4033; 
+            padding: 15px; 
+            border-radius: 8px; 
+            border-left: 5px solid #D2B48C;
+            margin-bottom: 15px;
+            font-size: 15px;
+            font-weight: 500;
+        ">
+            ☕ {text}
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
 
 # ------------------------------------------------------------------
 # 🔑 [보안 적용] 금고에서 OpenAI 키 및 Supabase 주소/열쇠 안전하게 가져오기
@@ -20,7 +43,7 @@ except KeyError as e:
     st.stop()
 
 # ------------------------------------------------------------------
-# 🔌 [DB 연동] 수파베이스 클라우드 창고에 무선 연결
+# 🔌 [DB 연동 & 캐싱] 수파베이스 클라우드 창고에 무선 연결 및 조회 최적화
 # ------------------------------------------------------------------
 @st.cache_resource
 def get_supabase_client() -> Client:
@@ -28,40 +51,39 @@ def get_supabase_client() -> Client:
 
 supabase: Client = get_supabase_client()
 
+# 🌟 [최적화 1] 10분간 메모리에 킵해두고 현재 손님의 데이터만 '조준 사격'해서 가져오는 효자 함수
+@st.cache_data(ttl=600)  
+def load_past_history_by_name(name: str):
+    # 🌟 [토큰 절약 핵심] .eq("name", name)을 붙여 불필요한 전체 데이터를 긁어오지 않고 토큰을 최소화합니다!
+    response = supabase.table("chat_history").select("name", "review", "reply").eq("name", name).execute()
+    return response.data
 
 # ------------------------------------------------------------------
 # 🛠️ [사이드바] 관리자 전용 삭제 데이터 조작 패널
 # ------------------------------------------------------------------
 st.sidebar.header("⚙️ 단골 명부 데이터 관리")
 
-# 먼저 최신 DB 목록을 실시간으로 가져옵니다.
 response_sidebar = supabase.table("chat_history").select("id", "name").execute()
 sidebar_records = response_sidebar.data
 
 if sidebar_records:
-    # 🌟 [요청사항 1] 손님 닉네임들과 '🚨 전체 삭제' 항목을 하나의 리스트로 통합
     unique_names = list(set([row["name"] for row in sidebar_records]))
     delete_options = unique_names + ["🚨 전체 데이터 삭제"]
     
     selected_target = st.sidebar.selectbox("삭제 대상을 선택하세요:", delete_options)
     
-    # 🌟 [요청사항 2] 흔히 쓰는 "정말 삭제하시겠습니까?" 전환형 확인창 구현
-    # 버튼 클릭 여부를 기억하기 위해 세션 상태(session_state) 활용
     if f"delete_clicked_{selected_target}" not in st.session_state:
         st.session_state[f"delete_clicked_{selected_target}"] = False
 
-    # 아직 삭제 버튼을 누르기 전 상태
     if not st.session_state[f"delete_clicked_{selected_target}"]:
         if st.sidebar.button("❌ 선택 대상 삭제하기"):
             st.session_state[f"delete_clicked_{selected_target}"] = True
-            st.rerun() # 화면을 확인창 상태로 새로고침
+            st.rerun() 
             
-    # 첫 번째 삭제 버튼을 누른 후 -> 창이 바뀐 듯한 대화상자 노출
     else:
         st.sidebar.warning(f"❓ 정말로 **[{selected_target}]** 항목을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")
         col_yes, col_no = st.sidebar.columns(2)
         
-        # "네, 삭제합니다" 클릭 시 진짜 삭제 진행
         with col_yes:
             if st.sidebar.button("⭕ 네, 삭제합니다", key="btn_yes"):
                 if selected_target == "🚨 전체 데이터 삭제":
@@ -73,10 +95,13 @@ if sidebar_records:
                         supabase.table("chat_history").delete().eq("name", selected_target).execute()
                 
                 st.session_state[f"delete_clicked_{selected_target}"] = False
+                
+                # 🌟 데이터가 실제로 삭제되었으므로 캐시 메모리를 깨끗하게 비워줍니다.
+                st.cache_data.clear()
+                
                 st.sidebar.success("성공적으로 영구 삭제되었습니다!")
                 st.rerun()
                 
-        # "아니오" 클릭 시 삭제 취소하고 원래 상태로 복귀
         with col_no:
             if st.sidebar.button("❌ 아니오", key="btn_no"):
                 st.session_state[f"delete_clicked_{selected_target}"] = False
@@ -110,33 +135,40 @@ tone_option = st.radio(
 # ------------------------------------------------------------------
 if st.button("✨ AI 답글 생성하기", key="ai_reply_button_1"):
     if not customer_name:
-        st.warning("손님의 닉네임을 입력해주세요.")
+        # 🎨 쨍한 빨간 경고창 대신 우리가 만든 예쁜 라떼 박스 적용!
+        st_latte_box("손님의 닉네임을 입력해주세요.")
     elif not review_input:
-        st.warning("리뷰를 입력해주세요.")
+        st_latte_box("리뷰를 입력해주세요.")
     else:
         llm = ChatOpenAI(model="gpt-4o-mini", openai_api_key=openai_api_key, temperature=0.7)
         
-        response_db = supabase.table("chat_history").select("name", "review", "reply").execute()
-        db_records = response_db.data
+        # 🌟 [최적화 2] 전체 조회가 아닌, 현재 손님의 과거 기록만 캐시 함수로 캐치!
+        current_customer_records = load_past_history_by_name(customer_name)
         
-        history_text = ""
-        for i, record in enumerate(db_records):
-            history_text += f"\n[과거 대화 {i+1}]\n손님 닉네임: {record['name']}\n손님 리뷰: {record['review']}\n사장님 답글: {record['reply']}\n"
+        # 🌟 [오판 방지 3] 파이썬이 정확하게 완벽 일치 여부를 검사하므로 
+        # "하나둘셋넷" 손님이 왔을 때 "하나"로 착각하는 일은 원천 차단됩니다.
+        if current_customer_records:
+            is_regular_customer = "예 (이전에 방문한 적이 있는 진짜 재방문 단골손님입니다!)"
+            history_text = ""
+            for i, record in enumerate(current_customer_records):
+                history_text += f"\n[과거 대화 {i+1}]\n손님 리뷰: {record['review']}\n사장님 답글: {record['reply']}\n"
+        else:
+            is_regular_customer = "아니오 (이번이 첫 방문인 손님입니다. 아는 척하지 마세요)"
+            history_text = "과거 방문 기록 없음"
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", """당신은 친절하고 센스 있는 카페 사장님입니다. 
             손님이 남긴 리뷰에 대해 감동적이고 재방문을 유도하는 답글을 작성해주세요.
             
+            [단골 여부 판독 결과]
+            현재 리뷰를 남긴 손님('{current_customer}')이 진짜 재방문 단골인가요?: {is_regular}
+            
             [핵심 지시사항]
-            당신은 과거에 손님들과 나눈 대화 기록을 기억하고 있습니다.
-            현재 리뷰를 남긴 손님의 닉네임은 '{current_customer}' 입니다.
+            위 [단골 여부 판독 결과]가 '예'라고 되어 있을 때만 반갑게 아는 척을 하세요.
+            만약 '아니오'라고 되어 있다면, 과거 대화 기록에 비슷한 글자(예: '하나'와 '하나둘셋넷')가 있더라도 
+            절대 아는 척을 하지 말고, 처음 온 손님 대하듯 정중하고 친절하게 답글을 쓰셔야 합니다.
             
-            만약 과거 대화 기록 중에서 이 손님('{current_customer}')의 닉네임과 일치하는 내역이 있다면,
-            이 손님은 우리 가게를 다시 찾은 '재방문 단골'입니다. 
-            "앗, {current_customer}님! 또 뵙네요!", "지난번 리뷰도 정말 감사했는데 이렇게 또 감동을 주시네요" 처럼 
-            반가움을 듬뿍 표현하고 과거에 대화했던 맥락을 은연중에 언급하세요.
-            
-            [과거 대화 기록]
+            [참고용 이 손님의 과거 기록]
             {history}
             
             [작성 규칙]
@@ -150,12 +182,13 @@ if st.button("✨ AI 답글 생성하기", key="ai_reply_button_1"):
         
         chain = prompt | llm
         
-        with st.spinner("클라우드 데이터베이스를 조회하며 최적의 답글을 고민하는 중..."):
+        with st.spinner("불필요한 토큰 낭비를 줄이고 안전하게 최적의 답글을 고민하는 중..."):
             response_ai = chain.invoke({
                 "history": history_text,
                 "tone": tone_option,
                 "current_customer": customer_name,
-                "review": review_input
+                "review": review_input,
+                "is_regular": is_regular_customer
             })
             
             supabase.table("chat_history").insert({
@@ -164,9 +197,14 @@ if st.button("✨ AI 답글 생성하기", key="ai_reply_button_1"):
                 "reply": response_ai.content
             }).execute()
             
+            # 🌟 새 데이터가 등록되었으니 다음 방문을 위해 캐시 메모리를 한 번 비워줍니다.
+            st.cache_data.clear()
+            
             st.success("🎉 AI 사장님의 추천 답글이 완성되었습니다!")
             st.subheader("📋 추천 답글 내용")
-            st.write(response_ai.content)
+            
+            # 🎨 결과 텍스트가 배경에 자연스럽게 스며들도록 갈색 톤다운 가미
+            st.markdown(f"<div style='color: #4A3B32; font-size: 16px; line-height: 1.6; white-space: pre-wrap;'>{response_ai.content}</div>", unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------

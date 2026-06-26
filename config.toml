@@ -1,0 +1,15 @@
+[theme]
+# ☕ 전체 배경을 포근한 밀크티/라떼 거품색으로 지정
+backgroundColor = "#FDFBF7"
+
+# ☕ 입력창이나 박스 내부 배경색
+secondaryBackgroundColor = "#F5EBE6"
+
+# ☕ 메인 글씨 색상 (부드러운 에스프레소 갈색)
+textColor = "#4A3B32"
+
+# ☕ 버튼을 누르거나 강조될 때의 포인트 라떼 아트 색상
+primaryColor = "#D2B48C"
+
+# ☕ 기본 글꼴을 세련된 산세리프체로 고정
+font = "sans serif"
