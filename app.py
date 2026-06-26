@@ -6,6 +6,24 @@ import datetime
 
 # [설정] 웹 페이지 제목 및 안내문
 st.set_page_config(page_title="카페 리뷰 답글 AI", page_icon="☕", layout="centered")
+
+st.markdown(
+    """
+    <style>
+    /* 앱 전체 배경색과 글자색 강제 변경 */
+    .stApp {
+        background-color: #FDFBF7 !important; /* 포근한 밀크티/라떼 거품색 */
+    }
+    /* 입력창이나 버튼 등 기본 요소들의 톤 통일 */
+    div[data-baseweb="input"] {
+        background-color: #FFFFFF !important;
+        border: 1px solid #D2B48C !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 st.title("☕ 카페 리뷰 답글 AI")
 st.write("리뷰를 입력해주세요!")
 
