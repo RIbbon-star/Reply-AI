@@ -5,7 +5,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 # [설정] 웹 페이지 제목 및 안내문
 st.set_page_config(page_title="카페 리뷰 답글 AI", page_icon="☕", layout="centered")
-st.title("☕ 우리집 카페 리뷰 답글 AI")
+st.title("☕ 카페 리뷰 답글 AI")
 st.write("리뷰를 입력해주세요!")
 
 # ------------------------------------------------------------------
@@ -59,74 +59,97 @@ def load_past_history_by_name(name: str):
     return response.data
 
 # ------------------------------------------------------------------
-# 🛠️ [사이드바] 관리자 전용 삭제 데이터 조작 패널
+# 🛠️ [사이드바] 관리자 전용 데이터 조작 패널 (2단계 정밀 삭제 시스템)
 # ------------------------------------------------------------------
 st.sidebar.header("⚙️ 단골 명부 데이터 관리")
 
-response_sidebar = supabase.table("chat_history").select("id", "name").execute()
+# 삭제를 위해 고유 ID와 닉네임, 리뷰 내용을 모두 가져옵니다.
+response_sidebar = supabase.table("chat_history").select("id", "name", "review").execute()
 sidebar_records = response_sidebar.data
 
 if sidebar_records:
+    # 1단계: 삭제할 손님 선택
     unique_names = list(set([row["name"] for row in sidebar_records]))
-    delete_options = unique_names + ["🚨 전체 데이터 삭제"]
+    selected_name = st.sidebar.selectbox("1. 대상을 선택하세요:", unique_names)
     
-    selected_target = st.sidebar.selectbox("삭제 대상을 선택하세요:", delete_options)
+    # 2단계: 해당 손님의 세부 기록들 모으기
+    customer_specific_records = [row for row in sidebar_records if row["name"] == selected_name]
     
-    if f"delete_clicked_{selected_target}" not in st.session_state:
-        st.session_state[f"delete_clicked_{selected_target}"] = False
+    # 셀렉트박스에 보여줄 세부 선택지 리스트 만들기
+    detail_options = []
+    id_mapping = {} # 사용자가 고른 텍스트가 어떤 DB ID인지 매핑해둘 금고
+    
+    for idx, row in enumerate(customer_specific_records):
+        # 리뷰 내용이 너무 길면 앞부분만 잘라서 보여주기
+        short_review = row["review"][:15] + "..." if len(row["review"]) > 15 else row["review"]
+        option_text = f"📄 [{idx+1}번째 기록] {short_review}"
+        detail_options.append(option_text)
+        id_mapping[option_text] = row["id"]
+        
+    # '이 사람의 전체 기록 삭제' 옵션도 하단에 추가
+    detail_options.append(f"🚨 【{selected_name}】 손님 전체 기록 삭제")
+    
+    selected_detail = st.sidebar.selectbox("2. 어떤 기록을 삭제할까요?:", detail_options)
+    
+    # 확인창 작동을 위한 세션 상태 세팅
+    session_key = f"del_{selected_name}_{selected_detail}"
+    if session_key not in st.session_state:
+        st.session_state[session_key] = False
 
-    if not st.session_state[f"delete_clicked_{selected_target}"]:
-        if st.sidebar.button("❌ 선택 대상 삭제하기"):
-            st.session_state[f"delete_clicked_{selected_target}"] = True
+    # 아직 삭제 버튼을 누르기 전
+    if not st.session_state[session_key]:
+        if st.sidebar.button("❌ 선택 내역 삭제하기", key=f"btn_del_{session_key}"):
+            st.session_state[session_key] = True
             st.rerun() 
             
+    # 버튼을 누른 후 (확인창 전환)
     else:
-        st.sidebar.warning(f"❓ 정말로 **[{selected_target}]** 항목을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")
+        st.sidebar.warning("❓ 정말로 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")
         col_yes, col_no = st.sidebar.columns(2)
         
         with col_yes:
-            if st.sidebar.button("⭕ 네, 삭제합니다", key="btn_yes"):
-                if selected_target == "🚨 전체 데이터 삭제":
-                    with st.spinner("클라우드 창고 통째로 비우는 중..."):
-                        id_list = [row["id"] for row in sidebar_records]
-                        supabase.table("chat_history").delete().in_("id", id_list).execute()
+            if st.sidebar.button("⭕ 네, 지웁니다", key=f"yes_{session_key}"):
+                # 전체 삭제를 고른 경우
+                if "🚨" in selected_detail:
+                    with st.spinner(f"【{selected_name}】 손님의 모든 기록 삭제 중..."):
+                        target_ids = [row["id"] for row in customer_specific_records]
+                        supabase.table("chat_history").delete().in_("id", target_ids).execute()
+                # 특정 기록 하나만 삭제를 고른 경우
                 else:
-                    with st.spinner(f"[{selected_target}] 손님 기록 지우는 중..."):
-                        supabase.table("chat_history").delete().eq("name", selected_target).execute()
+                    target_id = id_mapping[selected_detail]
+                    with st.spinner("선택하신 방문 기록 한 개 삭제 중..."):
+                        supabase.table("chat_history").delete().eq("id", target_id).execute()
                 
-                st.session_state[f"delete_clicked_{selected_target}"] = False
-                
-                # 🌟 데이터가 실제로 삭제되었으므로 캐시 메모리를 깨끗하게 비워줍니다.
-                st.cache_data.clear()
-                
+                st.session_state[session_key] = False
+                st.cache_data.clear() # 삭제가 일어났으므로 캐시 리셋
                 st.sidebar.success("성공적으로 영구 삭제되었습니다!")
                 st.rerun()
                 
         with col_no:
-            if st.sidebar.button("❌ 아니오", key="btn_no"):
-                st.session_state[f"delete_clicked_{selected_target}"] = False
+            if st.sidebar.button("❌ 아니오", key=f"no_{session_key}"):
+                st.session_state[session_key] = False
                 st.rerun()
 else:
     st.sidebar.info("저장된 단골 명부가 없어 삭제 메뉴가 비활성화되었습니다.")
 
-
 # ------------------------------------------------------------------
 # ✍️ 메인 화면: 닉네임, 리뷰 입력 및 옵션 선택
 # ------------------------------------------------------------------
+# strip() 과정에서 에러가 나지 않도록 처리
 customer_name = st.text_input(
     "👤 손님 닉네임 (아이디) 입력:",
-    placeholder="예: 배민_아메리카노조아, 네이버_초코맘",
+    placeholder="닉네임",
 ).strip()
 
 review_input = st.text_area(
     "📝 손님이 남긴 리뷰를 복사해서 붙여넣으세요:",
-    placeholder="여기에 배민이나 네이버 리뷰를 붙여넣으세요.",
+    placeholder="여기에 리뷰를 붙여넣으세요.",
     height=150
 )
 
 tone_option = st.radio(
     "📢 어떤 말투로 답글을 작성할까요?",
-    ("친절하고 따뜻하게 (기본)", "이모지 가득! 위트 있고 유머러스하게", "정중하고 진중하게 (불만족 리뷰 대응용)")
+    ("친절하고 따뜻하게 (기본)", "이모지 가득! 위트 + 유머러스", "정중하고 진중하게 (불만족 리뷰 대응용)")
 )
 
 
@@ -134,21 +157,22 @@ tone_option = st.radio(
 # ✨ AI 답글 생성 및 실시간 DB 클라우드 저장 로직
 # ------------------------------------------------------------------
 if st.button("✨ AI 답글 생성하기", key="ai_reply_button_1"):
-    if not customer_name:
-        # 🎨 쨍한 빨간 경고창 대신 우리가 만든 예쁜 라떼 박스 적용!
-        st_latte_box("손님의 닉네임을 입력해주세요.")
-    elif not review_input:
-        st_latte_box("리뷰를 입력해주세요.")
+    if not review_input:
+        st_latte_box("리뷰 내용을 입력해주세요.")
     else:
         llm = ChatOpenAI(model="gpt-4o-mini", openai_api_key=openai_api_key, temperature=0.7)
         
-        # 🌟 [최적화 2] 전체 조회가 아닌, 현재 손님의 과거 기록만 캐시 함수로 캐치!
-        current_customer_records = load_past_history_by_name(customer_name)
+        # 🌟 만약 이름을 안 적었다면 기본값을 '익명 손님'으로 세팅하여 에러를 방지합니다.
+        if not customer_name:
+            customer_name = "익명 손님"
+            current_customer_records = []
+        else:
+            current_customer_records = load_past_history_by_name(customer_name)
         
-        # 🌟 [오판 방지 3] 파이썬이 정확하게 완벽 일치 여부를 검사하므로 
+        # 🌟 [오판 방지] 파이썬이 정확하게 완벽 일치 여부를 검사하므로 
         # "하나둘셋넷" 손님이 왔을 때 "하나"로 착각하는 일은 원천 차단됩니다.
         if current_customer_records:
-            is_regular_customer = "예 (이전에 방문한 적이 있는 진짜 재방문 단골손님입니다!)"
+            is_regular_customer = "예 (이전에 방문한 적이 있는 재방문 단골손님입니다!)"
             history_text = ""
             for i, record in enumerate(current_customer_records):
                 history_text += f"\n[과거 대화 {i+1}]\n손님 리뷰: {record['review']}\n사장님 답글: {record['reply']}\n"
@@ -182,7 +206,7 @@ if st.button("✨ AI 답글 생성하기", key="ai_reply_button_1"):
         
         chain = prompt | llm
         
-        with st.spinner("불필요한 토큰 낭비를 줄이고 안전하게 최적의 답글을 고민하는 중..."):
+        with st.spinner("최적의 답글을 고민하는 중..."):
             response_ai = chain.invoke({
                 "history": history_text,
                 "tone": tone_option,
