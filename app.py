@@ -10,14 +10,53 @@ st.set_page_config(page_title="카페 리뷰 답글 AI", page_icon="☕", layout
 st.markdown(
     """
     <style>
-    /* 앱 전체 배경색과 글자색 강제 변경 */
+    /* 1. 메인 화면 전체 배경색 */
     .stApp {
-        background-color: #FDFBF7 !important; /* 포근한 밀크티/라떼 거품색 */
+        background-color: #FDFBF7 !important; 
     }
-    /* 입력창이나 버튼 등 기본 요소들의 톤 통일 */
-    div[data-baseweb="input"] {
+    
+    /* 2. 왼쪽 사이드바 배경색 및 구분선 */
+    section[data-testid="stSidebar"] {
+        background-color: #F5EBE6 !important;
+        border-right: 1px solid #D2B48C !important;
+    }
+    
+    /* 3. 사이드바 내부의 글자색 통일 */
+    section[data-testid="stSidebar"] .stMarkdown, 
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] h1, 
+    section[data-testid="stSidebar"] h2, 
+    section[data-testid="stSidebar"] h3 {
+        color: #5C4033 !important;
+    }
+
+    /* 4. 입력창 (텍스트 인풋, 텍스트 에어리어) 바탕색 및 갈색 테두리 */
+    div[data-baseweb="input"], div[data-baseweb="textarea"] {
         background-color: #FFFFFF !important;
         border: 1px solid #D2B48C !important;
+        border-radius: 6px !important;
+    }
+    
+    /* 5. 스트림릿 기본 버튼들 디자인 통일 (라떼 갈색 톤) */
+    div.stButton > button {
+        background-color: #8B5A2B !important;
+        color: #FFFFFF !important;
+        border: none !important;
+        border-radius: 6px !important;
+        font-weight: bold !important;
+        transition: background-color 0.2s ease !important;
+    }
+    
+    /* 버튼에 마우스 올렸을 때(호버) 살짝 더 진해지게 */
+    div.stButton > button:hover {
+        background-color: #5C4033 !important;
+        color: #FFFFFF !important;
+    }
+
+    /* 6. 라디오 버튼, 셀렉트박스 등 글자색 및 포인트 색상 매칭 */
+    label[data-testid="stWidgetLabel"] p {
+        color: #5C4033 !important;
+        font-weight: 600 !important;
     }
     </style>
     """,
