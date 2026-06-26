@@ -6,7 +6,7 @@ import datetime
 
 # [설정] 웹 페이지 제목 및 안내문
 st.set_page_config(page_title="카페 리뷰 답글 AI", page_icon="☕", layout="centered")
-st.title("☕ 우리집 카페 리뷰 답글 AI")
+st.title("☕ 카페 리뷰 답글 AI")
 st.write("리뷰를 입력해주세요!")
 
 # ------------------------------------------------------------------
@@ -322,7 +322,7 @@ if current_db_records:
         
     if grouped_history:
         for name, records in grouped_history.items():
-            with st.expander(f"👤 【{name}】 단골 손님 (총 {len(records)}개의 기록 보존됨)"):
+            with st.expander(f"👤 【{name}】손님 (총 {len(records)}개의 기록 보존됨)"):
                 for j, record in enumerate(records):
                     st.markdown(f"**📌 {j+1}번째 방문 기록**")
                     st.caption(f"**손님 리뷰:** {record['review']}")
