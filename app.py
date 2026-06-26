@@ -7,57 +7,44 @@ import datetime
 # [설정] 웹 페이지 제목 및 안내문
 st.set_page_config(page_title="카페 리뷰 답글 AI", page_icon="☕", layout="centered")
 
+# 2. 비밀번호용 가벼운 알림창 함수 정의 (정의만 하는 거라 에러 안 남)
+def st_latte_box(text: str):
+    st.markdown(
+        f"""
+        <div style="
+            background-color: #F5EBE6; 
+            color: #5C4033; 
+            padding: 15px; 
+            border-radius: 8px; 
+            border-left: 5px solid #D2B48C;
+            margin-bottom: 15px;
+            font-size: 15px;
+            font-weight: 500;
+        ">
+            ☕ {text}
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
+
+# 3. 🔐 비밀번호 입력창 배치
+password_input = st.text_input("🔑 관리자 인증 비밀번호를 입력하세요:", type="password")
+
+if password_input != st.secrets["APP_PASSWORD"]:
+    st_latte_box("올바른 비밀번호를 입력하시면 AI 사장님 비서 기능이 활성화됩니다.")
+    st.stop()  # 🛑 비밀번호 틀리면 여기서 대기 (아래 메인 코드로 안 넘어감)
+
+# 4. 🎨 [비밀번호 통과자만 진입] 메인 화면 종합 CSS 테마 도색
 st.markdown(
     """
     <style>
-    /* 1. 메인 화면 전체 배경색 */
-    .stApp {
-        background-color: #FDFBF7 !important; 
-    }
-    
-    /* 2. 왼쪽 사이드바 배경색 및 구분선 */
-    section[data-testid="stSidebar"] {
-        background-color: #F5EBE6 !important;
-        border-right: 1px solid #D2B48C !important;
-    }
-    
-    /* 3. 사이드바 내부의 글자색 통일 */
-    section[data-testid="stSidebar"] .stMarkdown, 
-    section[data-testid="stSidebar"] p,
-    section[data-testid="stSidebar"] h1, 
-    section[data-testid="stSidebar"] h2, 
-    section[data-testid="stSidebar"] h3 {
-        color: #5C4033 !important;
-    }
-
-    /* 4. 입력창 (텍스트 인풋, 텍스트 에어리어) 바탕색 및 갈색 테두리 */
-    div[data-baseweb="input"], div[data-baseweb="textarea"] {
-        background-color: #FFFFFF !important;
-        border: 1px solid #D2B48C !important;
-        border-radius: 6px !important;
-    }
-    
-    /* 5. 스트림릿 기본 버튼들 디자인 통일 (라떼 갈색 톤) */
-    div.stButton > button {
-        background-color: #8B5A2B !important;
-        color: #FFFFFF !important;
-        border: none !important;
-        border-radius: 6px !important;
-        font-weight: bold !important;
-        transition: background-color 0.2s ease !important;
-    }
-    
-    /* 버튼에 마우스 올렸을 때(호버) 살짝 더 진해지게 */
-    div.stButton > button:hover {
-        background-color: #5C4033 !important;
-        color: #FFFFFF !important;
-    }
-
-    /* 6. 라디오 버튼, 셀렉트박스 등 글자색 및 포인트 색상 매칭 */
-    label[data-testid="stWidgetLabel"] p {
-        color: #5C4033 !important;
-        font-weight: 600 !important;
-    }
+    .stApp { background-color: #FDFBF7 !important; }
+    section[data-testid="stSidebar"] { background-color: #F5EBE6 !important; border-right: 1px solid #D2B48C !important; }
+    section[data-testid="stSidebar"] .stMarkdown, section[data-testid="stSidebar"] p, section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3 { color: #5C4033 !important; }
+    div[data-baseweb="input"], div[data-baseweb="textarea"] { background-color: #FFFFFF !important; border: 1px solid #D2B48C !important; border-radius: 6px !important; }
+    div.stButton > button { background-color: #8B5A2B !important; color: #FFFFFF !important; border: none !important; border-radius: 6px !important; font-weight: bold !important; transition: background-color 0.2s ease !important; }
+    div.stButton > button:hover { background-color: #5C4033 !important; color: #FFFFFF !important; }
+    label[data-testid="stWidgetLabel"] p { color: #5C4033 !important; font-weight: 600 !important; }
     </style>
     """,
     unsafe_allow_html=True
