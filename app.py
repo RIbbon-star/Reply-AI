@@ -2,17 +2,17 @@ import streamlit as st
 from supabase import create_client, Client
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
+import datetime
 
 # [설정] 웹 페이지 제목 및 안내문
 st.set_page_config(page_title="카페 리뷰 답글 AI", page_icon="☕", layout="centered")
-st.title("☕ 카페 리뷰 답글 AI")
+st.title("☕ 우리집 카페 리뷰 답글 AI")
 st.write("리뷰를 입력해주세요!")
 
 # ------------------------------------------------------------------
 # 🎨 [디자인 가미] 감성적인 카페라떼 알림 박스 함수
 # ------------------------------------------------------------------
 def st_latte_box(text: str):
-    """쨍한 에러 메시지 대신 포근한 라떼색 배경으로 안내하는 커스텀 박스"""
     st.markdown(
         f"""
         <div style="
@@ -51,105 +51,101 @@ def get_supabase_client() -> Client:
 
 supabase: Client = get_supabase_client()
 
-# 🌟 [최적화 1] 10분간 메모리에 킵해두고 현재 손님의 데이터만 '조준 사격'해서 가져오는 효자 함수
 @st.cache_data(ttl=600)  
 def load_past_history_by_name(name: str):
-    # 🌟 [토큰 절약 핵심] .eq("name", name)을 붙여 불필요한 전체 데이터를 긁어오지 않고 토큰을 최소화합니다!
     response = supabase.table("chat_history").select("name", "review", "reply").eq("name", name).execute()
     return response.data
 
+@st.cache_data(ttl=60)
+def load_sidebar_records():
+    response = supabase.table("chat_history").select("id", "name", "review").order("id", desc=True).limit(500).execute()
+    return response.data
+
+@st.cache_data(ttl=60)
+def load_all_view_records():
+    response = supabase.table("chat_history").select("name", "review", "reply").order("id", desc=True).limit(500).execute()
+    return response.data
+
 # ------------------------------------------------------------------
-# 🛠️ [사이드바] 관리자 전용 데이터 조작 패널 (2단계 정밀 삭제 시스템)
+# 🛠️ [사이드바] 관리자 전용 데이터 조작 패널 (안전을 위해 구석에 격리 보관)
 # ------------------------------------------------------------------
 st.sidebar.header("⚙️ 단골 명부 데이터 관리")
 
-# 삭제를 위해 고유 ID와 닉네임, 리뷰 내용을 모두 가져옵니다.
-response_sidebar = supabase.table("chat_history").select("id", "name", "review").execute()
-sidebar_records = response_sidebar.data
+sidebar_records = load_sidebar_records()
 
 if sidebar_records:
-    # 1단계: 삭제할 손님 선택
     unique_names = list(set([row["name"] for row in sidebar_records]))
     selected_name = st.sidebar.selectbox("1. 대상을 선택하세요:", unique_names)
     
-    # 2단계: 해당 손님의 세부 기록들 모으기
     customer_specific_records = [row for row in sidebar_records if row["name"] == selected_name]
     
-    # 셀렉트박스에 보여줄 세부 선택지 리스트 만들기
     detail_options = []
-    id_mapping = {} # 사용자가 고른 텍스트가 어떤 DB ID인지 매핑해둘 금고
+    id_mapping = {} 
     
     for idx, row in enumerate(customer_specific_records):
-        # 리뷰 내용이 너무 길면 앞부분만 잘라서 보여주기
         short_review = row["review"][:15] + "..." if len(row["review"]) > 15 else row["review"]
         option_text = f"📄 [{idx+1}번째 기록] {short_review}"
         detail_options.append(option_text)
         id_mapping[option_text] = row["id"]
         
-    # '이 사람의 전체 기록 삭제' 옵션도 하단에 추가
     detail_options.append(f"🚨 【{selected_name}】 손님 전체 기록 삭제")
-    
     selected_detail = st.sidebar.selectbox("2. 어떤 기록을 삭제할까요?:", detail_options)
     
-    # 확인창 작동을 위한 세션 상태 세팅
     session_key = f"del_{selected_name}_{selected_detail}"
     if session_key not in st.session_state:
         st.session_state[session_key] = False
 
-    # 아직 삭제 버튼을 누르기 전
     if not st.session_state[session_key]:
         if st.sidebar.button("❌ 선택 내역 삭제하기", key=f"btn_del_{session_key}"):
             st.session_state[session_key] = True
             st.rerun() 
             
-    # 버튼을 누른 후 (확인창 전환)
     else:
         st.sidebar.warning("❓ 정말로 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")
         col_yes, col_no = st.sidebar.columns(2)
         
         with col_yes:
-            if st.sidebar.button("⭕ 네, 지웁니다", key=f"yes_{session_key}"):
-                # 전체 삭제를 고른 경우
+            if st.sidebar.button("⭕ 네, 지웁니다", key="yes_execute_btn"):
                 if "🚨" in selected_detail:
-                    with st.spinner(f"【{selected_name}】 손님의 모든 기록 삭제 중..."):
+                    with st.spinner(f"【{selected_name}】 모든 기록 삭제 중..."):
                         target_ids = [row["id"] for row in customer_specific_records]
                         supabase.table("chat_history").delete().in_("id", target_ids).execute()
-                # 특정 기록 하나만 삭제를 고른 경우
                 else:
                     target_id = id_mapping[selected_detail]
                     with st.spinner("선택하신 방문 기록 한 개 삭제 중..."):
                         supabase.table("chat_history").delete().eq("id", target_id).execute()
                 
                 st.session_state[session_key] = False
-                st.cache_data.clear() # 삭제가 일어났으므로 캐시 리셋
+                st.cache_data.clear() 
                 st.sidebar.success("성공적으로 영구 삭제되었습니다!")
                 st.rerun()
                 
         with col_no:
-            if st.sidebar.button("❌ 아니오", key=f"no_{session_key}"):
+            if st.sidebar.button("❌ 아니오", key="no_cancel_btn"):
                 st.session_state[session_key] = False
                 st.rerun()
 else:
     st.sidebar.info("저장된 단골 명부가 없어 삭제 메뉴가 비활성화되었습니다.")
 
+
 # ------------------------------------------------------------------
-# ✍️ 메인 화면: 닉네임, 리뷰 입력 및 옵션 선택
+# ✍️ 메인 화면: 닉네임(선택), 리뷰 입력 및 옵션 선택
 # ------------------------------------------------------------------
-# strip() 과정에서 에러가 나지 않도록 처리
-customer_name = st.text_input(
-    "👤 손님 닉네임 (아이디) 입력:",
-    placeholder="닉네임",
-).strip()
+raw_customer_name = st.text_input(
+    "👤 손님 닉네임 (입력하지 않으면 '익명 손님'으로 처리됩니다):",
+    placeholder="예: 배민_아메리카노조아 (비워두셔도 됩니다)",
+)
+customer_name = raw_customer_name.strip() if raw_customer_name else ""
 
 review_input = st.text_area(
     "📝 손님이 남긴 리뷰를 복사해서 붙여넣으세요:",
-    placeholder="여기에 리뷰를 붙여넣으세요.",
+    placeholder="여기에 배민이나 네이버 리뷰를 붙여넣으세요.",
     height=150
 )
 
 tone_option = st.radio(
     "📢 어떤 말투로 답글을 작성할까요?",
-    ("친절하고 따뜻하게 (기본)", "이모지 가득! 위트 + 유머러스", "정중하고 진중하게 (불만족 리뷰 대응용)")
+    ("친절하고 따뜻하게 (기본)", "이모지 가득! 위트 있고 유머러스하게", "정중하고 진중하게 (불만족 리뷰 대응용)")
 )
 
 
@@ -162,17 +158,18 @@ if st.button("✨ AI 답글 생성하기", key="ai_reply_button_1"):
     else:
         llm = ChatOpenAI(model="gpt-4o-mini", openai_api_key=openai_api_key, temperature=0.7)
         
-        # 🌟 만약 이름을 안 적었다면 기본값을 '익명 손님'으로 세팅하여 에러를 방지합니다.
+        is_anonymous = False
         if not customer_name:
-            customer_name = "익명 손님"
+            is_anonymous = True
+            now_str = datetime.datetime.now().strftime("%m%d_%H%M")
+            db_save_name = f"익명_{now_str}"
             current_customer_records = []
         else:
+            db_save_name = customer_name
             current_customer_records = load_past_history_by_name(customer_name)
         
-        # 🌟 [오판 방지] 파이썬이 정확하게 완벽 일치 여부를 검사하므로 
-        # "하나둘셋넷" 손님이 왔을 때 "하나"로 착각하는 일은 원천 차단됩니다.
-        if current_customer_records:
-            is_regular_customer = "예 (이전에 방문한 적이 있는 재방문 단골손님입니다!)"
+        if current_customer_records and not is_anonymous:
+            is_regular_customer = "예 (이전에 방문한 적이 있는 진짜 재방문 단골손님입니다!)"
             history_text = ""
             for i, record in enumerate(current_customer_records):
                 history_text += f"\n[과거 대화 {i+1}]\n손님 리뷰: {record['review']}\n사장님 답글: {record['reply']}\n"
@@ -180,79 +177,157 @@ if st.button("✨ AI 답글 생성하기", key="ai_reply_button_1"):
             is_regular_customer = "아니오 (이번이 첫 방문인 손님입니다. 아는 척하지 마세요)"
             history_text = "과거 방문 기록 없음"
         
+        # 🌟 [요청사항 4번 반영] 프롬프트에 글자 수 제한 규칙을 강력하게 각인시킵니다.
         prompt = ChatPromptTemplate.from_messages([
             ("system", """당신은 친절하고 센스 있는 카페 사장님입니다. 
             손님이 남긴 리뷰에 대해 감동적이고 재방문을 유도하는 답글을 작성해주세요.
             
             [단골 여부 판독 결과]
-            현재 리뷰를 남긴 손님('{current_customer}')이 진짜 재방문 단골인가요?: {is_regular}
+            현재 리뷰를 남긴 손님은 진짜 재방문 단골인가요?: {is_regular}
             
             [핵심 지시사항]
-            위 [단골 여부 판독 결과]가 '예'라고 되어 있을 때만 반갑게 아는 척을 하세요.
-            만약 '아니오'라고 되어 있다면, 과거 대화 기록에 비슷한 글자(예: '하나'와 '하나둘셋넷')가 있더라도 
-            절대 아는 척을 하지 말고, 처음 온 손님 대하듯 정중하고 친절하게 답글을 쓰셔야 합니다.
+            1. 위 판독 결과가 '예'라고 되어 있을 때만 반갑게 아는 척을 하세요.
+            2. 배달앱 등록 규격에 맞춰, 공백 포함 반드시 **300자 내외로 너무 길지 않고 컴팩트하게** 작성하세요. (가장 중요)
             
             [참고용 이 손님의 과거 기록]
             {history}
             
-            [작성 규칙]
-            1. 손님이 칭찬한 부분에 대해 진심으로 감사 인사를 전하세요.
-            2. 손님이 아쉬워한 부분이 있다면 유연하게 공감하고 개선하겠다는 의지를 보이세요.
-            3. 지정된 말투 스타일을 완벽하게 반영하세요.
-            
             지정된 말투 스타일: {tone}"""),
-            ("human", "현재 손님 닉네임: {current_customer}\n현재 손님 리뷰: {review}")
+            ("human", "현재 손님 리뷰: {review}")
         ])
         
         chain = prompt | llm
         
-        with st.spinner("최적의 답글을 고민하는 중..."):
+        with st.spinner("불필요한 토큰 낭비를 줄이고 안전하게 최적의 답글을 고민하는 중..."):
             response_ai = chain.invoke({
                 "history": history_text,
                 "tone": tone_option,
-                "current_customer": customer_name,
-                "review": review_input,
-                "is_regular": is_regular_customer
+                "is_regular": is_regular_customer,
+                "review": review_input
             })
             
             supabase.table("chat_history").insert({
-                "name": customer_name,
+                "name": db_save_name,
                 "review": review_input,
                 "reply": response_ai.content
             }).execute()
             
-            # 🌟 새 데이터가 등록되었으니 다음 방문을 위해 캐시 메모리를 한 번 비워줍니다.
-            st.cache_data.clear()
+            st.cache_data.clear() 
             
             st.success("🎉 AI 사장님의 추천 답글이 완성되었습니다!")
             st.subheader("📋 추천 답글 내용")
             
-            # 🎨 결과 텍스트가 배경에 자연스럽게 스며들도록 갈색 톤다운 가미
+            # 결과물 렌더링
             st.markdown(f"<div style='color: #4A3B32; font-size: 16px; line-height: 1.6; white-space: pre-wrap;'>{response_ai.content}</div>", unsafe_allow_html=True)
+            
+            # 🌟 [요청사항 4번 반영] 글자 수 카운터 배치
+            char_count = len(response_ai.content)
+            st.caption(f"📝 현재 답글 글자 수: **{char_count}자** (공백 포함) / 배민·네이버 플레이스 등록 최적")
+            
+            # 🌟 [사용자 경험 극대화] 클릭/터치 시 부드럽게 사라지는 커스텀 라떼 토스트 팝업
+            st.components.v1.html(
+                f"""
+                <div id="toast" style="
+                    position: fixed;
+                    top: 20px;
+                    left: 50%;
+                    transform: translateX(-50%) translateY(-20px);
+                    background-color: #4A3B32;
+                    color: #FDFBF7;
+                    padding: 12px 24px;
+                    border-radius: 30px;
+                    font-size: 14px;
+                    font-weight: bold;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                    z-index: 9999;
+                    opacity: 0;
+                    transition: all 0.3s ease;
+                    pointer-events: none; /* 평소엔 터치 방해 금지 */
+                    cursor: pointer;
+                ">
+                    📋 답글이 복사되었습니다! 배민에 바로 붙여넣으세요.
+                </div>
 
+                <button onclick="copyAndShowToast()" style="
+                    background-color: #D2B48C;
+                    color: white;
+                    border: none;
+                    padding: 10px 20px;
+                    font-size: 14px;
+                    font-weight: bold;
+                    border-radius: 5px;
+                    cursor: pointer;
+                    width: 100%;
+                    margin-top: 10px;
+                ">📋 클릭 한 번으로 답글 바로 복사하기</button>
+
+                <script>
+                const toast = document.getElementById('toast');
+
+                function copyAndShowToast() {{
+                    const text = `{response_ai.content}`;
+                    navigator.clipboard.writeText(text).then(function() {{
+                        // 토스트 알림 켜기
+                        toast.style.opacity = "1";
+                        toast.style.transform = "translateX(-50%) translateY(0px)";
+                        toast.style.pointerEvents = "auto"; /* 클릭 가능하게 전환 */
+
+                        // ⚠️ 2.5초 뒤에 자동으로 안 없어지더라도 사용자가 터치하면 바로 사라지도록 이벤트 추가
+                        window.addEventListener('click', closeToast);
+                        window.addEventListener('touchstart', closeToast);
+                    }}, function(err) {{
+                        console.error('복사 실패: ', err);
+                    }});
+                }}
+
+                function closeToast() {{
+                    toast.style.opacity = "0";
+                    toast.style.transform = "translateX(-50%) translateY(-20px)";
+                    toast.style.pointerEvents = "none";
+                    
+                    // 이벤트 리스너 제거 (메모리 관리)
+                    window.removeEventListener('click', closeToast);
+                    window.removeEventListener('touchstart', closeToast);
+                }}
+                </script>
+                """,
+                height=70
+                # 이 구역 하단에 iframe 여백이 생기지 않도록 가볍게 감싸줍니다.
+            )
 
 # ------------------------------------------------------------------
 # 🗂️ 최하단: 클라우드 DB에서 실시간 분류해오는 '폴더형' 단골 명부
 # ------------------------------------------------------------------
-response_view = supabase.table("chat_history").select("name", "review", "reply").execute()
-current_db_records = response_view.data
+current_db_records = load_all_view_records()
 
 if current_db_records:
     st.write("---")
     st.subheader("🗂️ 클라우드 DB에 저장된 단골 명부 (닉네임별 분류)")
     
+    # 🌟 [요청사항 3번 반영] 수백 명의 단골 중 엄마가 원하는 사람을 0.1초 만에 찾는 실시간 검색창
+    search_query = st.text_input("🔍 찾고 싶은 단골 손님의 닉네임을 입력하세요 (실시간 필터링):", placeholder="검색할 이름을 적으세요...").strip()
+    
     grouped_history = {}
     for record in current_db_records:
         name = record["name"]
-        if name not in grouped_history:
-            grouped_history[name] = []
-        grouped_history[name].append({"review": record["review"], "reply": record["reply"]})
+        display_name = "익명 손님" if name.startswith("익명_") else name
         
-    for name, records in grouped_history.items():
-        with st.expander(f"👤 【{name}】 단골 손님 (총 {len(records)}개의 기록 보존됨)"):
-            for j, record in enumerate(records):
-                st.markdown(f"**📌 {j+1}번째 방문 기록**")
-                st.caption(f"**손님 리뷰:** {record['review']}")
-                st.info(f"**☕ 사장님 대답:** {record['reply']}")
-                if j < len(records) - 1:
-                    st.write("---")
+        # 🌟 검색어가 입력되었다면, 해당 검색어가 포함된 손님만 묶음 그룹에 추가 (대소문자 무시)
+        if search_query and search_query.lower() not in display_name.lower():
+            continue
+            
+        if display_name not in grouped_history:
+            grouped_history[display_name] = []
+        grouped_history[display_name].append({"review": record["review"], "reply": record["reply"]})
+        
+    if grouped_history:
+        for name, records in grouped_history.items():
+            with st.expander(f"👤 【{name}】 단골 손님 (총 {len(records)}개의 기록 보존됨)"):
+                for j, record in enumerate(records):
+                    st.markdown(f"**📌 {j+1}번째 방문 기록**")
+                    st.caption(f"**손님 리뷰:** {record['review']}")
+                    st.info(f"**☕ 사장님 대답:** {record['reply']}")
+                    if j < len(records) - 1:
+                        st.write("---")
+    else:
+        st.info("검색 결과와 일치하는 단골 손님이 없습니다.")
