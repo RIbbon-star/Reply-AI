@@ -7,7 +7,7 @@ import datetime
 # [설정] 웹 페이지 제목 및 안내문
 st.set_page_config(page_title="카페 리뷰 답글 AI", page_icon="☕", layout="centered")
 
-# 2. 비밀번호용 가벼운 알림창 함수 정의 (정의만 하는 거라 에러 안 남)
+# 2. 알림창 함수 정의
 def st_latte_box(text: str):
     st.markdown(
         f"""
@@ -27,13 +27,20 @@ def st_latte_box(text: str):
         unsafe_allow_html=True
     )
 
-# 3. 🔐 비밀번호 입력창 배치
-password_input = st.text_input("🔑 관리자 인증 비밀번호를 입력하세요:", type="password")
+# 3. 🔐 [UX 개선] 비밀번호 입력창을 제어할 빈 컨테이너박스 생성
+auth_container = st.empty()
+
+# 컨테이너 상자 안에 비밀번호 입력창을 집어넣습니다.
+password_input = auth_container.text_input("🔑 관리자 인증 비밀번호를 입력하세요:", type="password")
 
 if password_input != st.secrets["APP_PASSWORD"]:
     st_latte_box("올바른 비밀번호를 입력하시면 AI 사장님 비서 기능이 활성화됩니다.")
-    st.stop()  # 🛑 비밀번호 틀리면 여기서 대기 (아래 메인 코드로 안 넘어감)
-
+    st.stop()  # 🛑 틀리면 여기서 대기
+else:
+    # 🎉 비밀번호가 맞으면? 입력창이 있던 상자 내용물을 싹 비워버립니다!
+    auth_container.empty()
+    # 만약 완전히 빈 공간이 어색하다면 아래 주석(#)을 풀고 성공 메시지를 띄워도 됩니다.
+    # auth_container.success("🔓 인증되었습니다. 메인 화면을 편집하세요!")
 # 4. 🎨 [비밀번호 통과자만 진입] 메인 화면 종합 CSS 테마 도색
 st.markdown(
     """
